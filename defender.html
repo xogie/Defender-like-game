@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DEFENDER // TACTICAL DISPLAY</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: #050505;
+      color: #0f0;
+      font-family: 'Courier New', Courier, monospace;
+    }
+
+    /* CRT monitor frame */
+    #crt {
+      position: relative;
+      width: 100vw; height: 100vh;
+      background: radial-gradient(ellipse at center, #0a1a0a 0%, #000 80%);
+      overflow: hidden;
+    }
+    #crt::before {
+      content: '';
+      position: absolute; inset: 0;
+      pointer-events: none;
+      z-index: 30;
+      background:
+        radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.55) 75%, rgba(0,0,0,0.9) 100%),
+        repeating-linear-gradient(0deg, rgba(0,0,0,0.10) 0px, rgba(0,0,0,0.10) 1px, transparent 1px, transparent 4px);
+      background-size: 100% 100%, 100% 8px;
+      animation: flicker 0.12s infinite;
+    }
+    #crt::after {
+      content: '';
+      position: absolute; inset: 0;
+      pointer-events: none;
+      z-index: 31;
+      box-shadow: inset 0 0 80px rgba(0,0,0,0.8);
+      border: 18px solid #111;
+      border-radius: 24px;
+    }
+    @keyframes flicker {
+      0% { opacity: 0.97; }
+      50% { opacity: 1; }
+      100% { opacity: 0.98; }
+    }
+
+    canvas { display: block; }
+
+    #radar {
+      position: absolute; top: 0; left: 0; width: 100%; height: 42px;
+      background: rgba(0,18,0,0.95);
+      border-bottom: 2px solid #0f0;
+      z-index: 35;
+      pointer-events: none;
+    }
+
+    #ui {
+      position: absolute; top: 48px; left: 0; width: 100%;
+      padding: 6px 18px;
+      font-size: 14px;
+      pointer-events: none;
+      text-shadow: 0 0 6px #0f0, 0 0 12px #0f0;
+      z-index: 35;
+      display: flex; justify-content: space-between; align-items: flex-start;
+    }
+    #hud-left, #hud-right { display: flex; flex-direction: column; gap: 4px; }
+    #hud-left { align-items: flex-start; }
+    #hud-right { align-items: flex-end; }
+    .hud-line { white-space: pre; }
+    #console {
+      position: absolute; bottom: 14px; left: 18px; right: 18px;
+      height: 78px;
+      background: rgba(0,10,0,0.7);
+      border: 1px solid rgba(0,255,0,0.35);
+      padding: 8px 12px;
+      font-size: 12px;
+      line-height: 1.45;
+      color: #8f8;
+      text-shadow: 0 0 4px #0f0;
+      pointer-events: none;
+      overflow: hidden;
+      z-index: 35;
+    }
+    #console::before {
+      content: 'MISSION LOG'; position: absolute; top: 2px; right: 8px;
+      font-size: 10px; color: #0f0; opacity: 0.6;
+    }
+    .log-entry { opacity: 0.7; }
+    .log-entry.recent { opacity: 1; color: #afa; }
+
+    #overlay {
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      background: rgba(0,8,0,0.92);
+      border: 2px solid #0f0;
+      padding: 34px 46px;
+      border-radius: 4px;
+      z-index: 40;
+      box-shadow: 0 0 30px rgba(0,255,0,0.25), inset 0 0 40px rgba(0,255,0,0.08);
+    }
+    #overlay h1 {
+      font-size: 38px; margin-bottom: 14px;
+      letter-spacing: 6px;
+      text-shadow: 0 0 8px #0f0, 0 0 20px #0f0;
+      animation: textPulse 2s infinite;
+    }
+    @keyframes textPulse {
+      0%, 100% { opacity: 0.92; }
+      50% { opacity: 1; }
+    }
+    #overlay p { margin: 7px 0; font-size: 14px; line-height: 1.6; color: #afa; }
+    #start {
+      margin-top: 18px; padding: 11px 32px;
+      font-family: inherit; font-size: 16px;
+      background: #000; color: #0f0;
+      border: 2px solid #0f0; cursor: pointer;
+      text-shadow: 0 0 5px #0f0;
+      transition: 0.15s;
+    }
+    #start:hover { background: #0f0; color: #000; box-shadow: 0 0 18px #0f0; }
+
+    #banner {
+      position: absolute; top: 28%; left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 28px; letter-spacing: 4px;
+      color: #0f0; text-shadow: 0 0 10px #0f0;
+      pointer-events: none; opacity: 0;
+      transition: opacity 0.2s;
+      z-index: 36;
+    }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div id="crt">
+    <canvas id="game"></canvas>
+    <canvas id="radar" class="hidden"></canvas>
+    <div id="ui" class="hidden">
+      <div id="hud-left">
+        <div class="hud-line" id="hud-score">SCORE 0000000</div>
+        <div class="hud-line" id="hud-wave">WAVE 1</div>
+      </div>
+      <div id="hud-right">
+        <div class="hud-line" id="hud-lives">LIVES 3</div>
+        <div class="hud-line" id="hud-bombs">BOMBS 3</div>
+        <div class="hud-line" id="hud-humans">HUMANS 10</div>
+      </div>
+    </div>
+    <div id="console" class="hidden"></div>
+    <div id="banner"></div>
+    <div id="overlay">
+      <h1>DEFENDER</h1>
+      <p>Arrow keys / WASD to fly &nbsp;•&nbsp; SPACE to fire<br>
+         B smart bomb &nbsp;•&nbsp; H hyperspace</p>
+      <p>Rescue humans before landers carry them off-screen<br>or they mutate into fast, deadly mutants.</p>
+      <button id="start">START MISSION</button>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const ui = document.getElementById('ui');
+    const consoleEl = document.getElementById('console');
+    const overlay = document.getElementById('overlay');
+    const startBtn = document.getElementById('start');
+    const banner = document.getElementById('banner');
+    const radarCanvas = document.getElementById('radar');
+    const rctx = radarCanvas.getContext('2d');
+
+    const RADAR_H = 42;
+    let W, H, GROUND_Y;
+    function resize() {
+      W = canvas.width = window.innerWidth;
+      H = canvas.height = window.innerHeight;
+      radarCanvas.width = W;
+      radarCanvas.height = RADAR_H;
+      GROUND_Y = H - 80;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    const WORLD_WIDTH = 6000;
+    const keys = {};
+    window.addEventListener('keydown', e => {
+      keys[e.key] = true;
+      if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+      if (e.key === ' ' && gameRunning) e.preventDefault();
+    });
+    window.addEventListener('keyup', e => keys[e.key] = false);
+
+    function rnd(a, b) { return Math.random() * (b - a) + a; }
+    function wrap(x) { x %= WORLD_WIDTH; if (x < 0) x += WORLD_WIDTH; return x; }
+    function shortDx(a, b) {
+      let dx = b - a;
+      if (dx > WORLD_WIDTH / 2) dx -= WORLD_WIDTH;
+      if (dx < -WORLD_WIDTH / 2) dx += WORLD_WIDTH;
+      return dx;
+    }
+    function dist(a, b) { return Math.hypot(shortDx(a.x, b.x), a.y - b.y); }
+
+    function groundHeightAt(x) {
+      x = wrap(x);
+      return 20 + 36 * Math.sin(x * 0.004) + 18 * Math.sin(x * 0.012) + 9 * Math.sin(x * 0.035);
+    }
+    function groundYAt(x) { return GROUND_Y - groundHeightAt(x); }
+
+    // === AUDIO ===
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    let audioCtx = null;
+    function ensureAudio() {
+      if (!audioCtx) audioCtx = new AudioCtx();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    }
+    function tone(freq, type, duration, vol = 0.08, slide = 0) {
+      if (!audioCtx) return;
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = type; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slide) o.frequency.exponentialRampToValueAtTime(slide, audioCtx.currentTime + duration);
+      g.gain.setValueAtTime(vol, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+      o.connect(g).connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + duration);
+    }
+    function noise(duration, vol = 0.1) {
+      if (!audioCtx) return;
+      const len = Math.floor(audioCtx.sampleRate * duration);
+      const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+      const src = audioCtx.createBufferSource(); src.buffer = buf;
+      const g = audioCtx.createGain();
+      g.gain.setValueAtTime(vol, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+      src.connect(g).connect(audioCtx.destination); src.start();
+    }
+    const sfx = {
+      shoot: () => tone(880, 'square', 0.08, 0.06, 220),
+      explosion: () => noise(0.25, 0.12),
+      bomb: () => { noise(0.6, 0.18); tone(120, 'sawtooth', 0.5, 0.1, 30); },
+      hyper: () => tone(440, 'sine', 0.35, 0.08, 60),
+      pickup: () => { tone(660, 'square', 0.08, 0.05, 880); tone(880, 'square', 0.12, 0.05, 1320); },
+      land: () => tone(440, 'triangle', 0.15, 0.06, 880),
+      alarm: () => tone(760, 'square', 0.12, 0.05, 760),
+      mutant: () => tone(180, 'sawtooth', 0.3, 0.08, 90)
+    };
+
+    // === STARS ===
+    const stars = [];
+    for (let i = 0; i < 350; i++) {
+      stars.push({ x: rnd(0, WORLD_WIDTH), y: rnd(0, H * 0.72), p: rnd(0.1, 0.8), s: rnd(0.5, 2.2), twinkle: rnd(0, Math.PI * 2) });
+    }
+
+    let player = null;
+    let bullets = [], enemies = [], humans = [], particles = [], mines = [], trails = [];
+    let score = 0, lives = 0, wave = 0, smartBombs = 0, cameraX = 0;
+    let gameRunning = false, waveTimer = 0, baiterTimer = 0;
+    let screenShake = 0, flash = 0, bannerText = '', bannerTimer = 0;
+
+    function resetGame() {
+      player = {
+        x: WORLD_WIDTH / 2, y: H * 0.35,
+        vx: 0, vy: 0, r: 10,
+        face: 1, invuln: 0,
+        carrying: null,
+        fireCd: 0
+      };
+      bullets = []; enemies = []; humans = []; particles = []; mines = []; trails = [];
+      score = 0; lives = 3; wave = 0; smartBombs = 3; cameraX = 0; baiterTimer = 0;
+      screenShake = 0; flash = 0;
+      spawnHumans(10);
+      clearConsole();
+      log('SYSTEM ONLINE. PROTECT THE COLONY.', true);
+      nextWave();
+    }
+
+    function spawnHumans(n) {
+      for (let i = 0; i < n; i++) {
+        const x = rnd(100, WORLD_WIDTH - 100);
+        humans.push({ x, y: groundYAt(x) - 8, vy: 0, state: 'ground', r: 6 });
+      }
+    }
+
+    function nextWave() {
+      wave++;
+      waveTimer = 2.5;
+      const landers = 5 + wave * 2;
+      const bombers = 1 + Math.floor(wave / 2);
+      const pods = wave > 2 ? Math.floor((wave - 1) / 3) : 0;
+      for (let i = 0; i < landers; i++) spawnLander();
+      for (let i = 0; i < bombers; i++) spawnBomber();
+      for (let i = 0; i < pods; i++) spawnPod();
+      if (humans.length < 5) spawnHumans(8 - humans.length);
+      showBanner(`WAVE ${wave} // INCOMING`);
+      log(`WAVE ${wave} DETECTED. ${landers} LANDERS, ${bombers} BOMBERS, ${pods} PODS.`, true);
+    }
+
+    function spawnLander() {
+      const x = rnd(0, WORLD_WIDTH);
+      enemies.push({
+        type: 'lander', x, y: rnd(60, GROUND_Y * 0.45),
+        vx: 0, vy: 0, r: 11, hp: 1,
+        speed: 1.5 + wave * 0.08,
+        target: null, carry: null,
+        fromWave: true
+      });
+    }
+
+    function spawnBomber() {
+      const dir = Math.random() < 0.5 ? -1 : 1;
+      enemies.push({
+        type: 'bomber', x: rnd(0, WORLD_WIDTH), y: rnd(80, GROUND_Y * 0.35),
+        vx: dir * rnd(2, 3.5), vy: 0, r: 14, hp: 1,
+        dropCd: rnd(1, 2.5), fromWave: true
+      });
+    }
+
+    function spawnPod() {
+      enemies.push({
+        type: 'pod', x: rnd(0, WORLD_WIDTH), y: rnd(80, GROUND_Y * 0.4),
+        vx: rnd(-1, 1), vy: rnd(-0.5, 0.5), r: 13, hp: 1,
+        phase: rnd(0, Math.PI * 2), fromWave: true
+      });
+    }
+
+    function spawnMutant(x, y, fromAbduction) {
+      enemies.push({
+        type: 'mutant', x, y,
+        vx: 0, vy: 0, r: 10, hp: 1,
+        speed: 3.8 + wave * 0.2,
+        fromWave: fromAbduction
+      });
+    }
+
+    function spawnSwarmers(x, y) {
+      for (let i = 0; i < 3; i++) {
+        enemies.push({
+          type: 'swarmer', x, y,
+          vx: 0, vy: 0, r: 6, hp: 1,
+          speed: 4.5 + wave * 0.15,
+          phase: rnd(0, Math.PI * 2)
+        });
+      }
+    }
+
+    function spawnBaiter() {
+      const dir = player.vx >= 0 ? 1 : -1;
+      const x = wrap(player.x - dir * (W / 2 + 80));
+      enemies.push({
+        type: 'baiter', x, y: player.y,
+        vx: dir, vy: 0, r: 9, hp: 1,
+        speed: 5.5 + wave * 0.25
+      });
+    }
+
+    function spawnMine(x, y) {
+      mines.push({ x, y, vx: 0, vy: 0, r: 5, life: 6 });
+    }
+
+    function addExplosion(x, y, color, count, speedMul = 1) {
+      screenShake = Math.min(screenShake + count * 0.08, 8);
+      for (let i = 0; i < count; i++) {
+        const a = rnd(0, Math.PI * 2);
+        const sp = rnd(1, 5) * speedMul;
+        particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: rnd(0.3, 0.9), color, size: rnd(1.5, 4) });
+      }
+    }
+
+    function addTrail(x, y, color) {
+      trails.push({ x, y, life: rnd(0.2, 0.45), color, size: rnd(2, 4) });
+    }
+
+    function killPlayer() {
+      if (player.invuln > 0 || !gameRunning) return;
+      sfx.explosion();
+      addExplosion(player.x, player.y, '#fff', 40);
+      screenShake = 12; flash = 0.4;
+      if (player.carrying) {
+        player.carrying.state = 'falling';
+        player.carrying.vy = 0;
+        player.carrying = null;
+      }
+      lives--;
+      log(`SHIP DESTROYED. LIVES REMAINING: ${lives}`, true);
+      if (lives <= 0) {
+        gameOver();
+      } else {
+        player.x = WORLD_WIDTH / 2;
+        player.y = H * 0.35;
+        player.vx = 0; player.vy = 0;
+        player.invuln = 2.5;
+      }
+    }
+
+    function killEnemy(e, source) {
+      const idx = enemies.indexOf(e);
+      if (idx >= 0) enemies.splice(idx, 1);
+      if (e.carry) {
+        e.carry.state = 'falling';
+        e.carry.vy = 0;
+      }
+      if (source !== 'bomb') sfx.explosion();
+      addExplosion(e.x, e.y, enemyColor(e.type), 18);
+
+      const pts = { lander: 150, mutant: 200, bomber: 250, pod: 100, swarmer: 100, baiter: 200 }[e.type] || 50;
+      score += pts;
+
+      if (e.type === 'pod') {
+        spawnSwarmers(e.x, e.y);
+        log('POD BURST. SWARMERS RELEASED.', true);
+      }
+    }
+
+    function enemyColor(t) {
+      return { lander: '#f55', mutant: '#fa4', bomber: '#5f5', pod: '#d5f', swarmer: '#ff5', baiter: '#fff' }[t] || '#aaa';
+    }
+
+    function smartBomb() {
+      if (smartBombs <= 0 || !gameRunning) return;
+      smartBombs--;
+      sfx.bomb();
+      flash = 0.6; screenShake = 14;
+      for (const e of enemies.slice()) killEnemy(e, 'bomb');
+      for (const m of mines.slice()) {
+        addExplosion(m.x, m.y, '#5f5', 10);
+        mines.splice(mines.indexOf(m), 1);
+      }
+      addExplosion(player.x, player.y, '#0ff', 30, 1.5);
+      log('SMART BOMB DETONATED. SECTOR CLEARED.', true);
+    }
+
+    function hyperspace() {
+      if (!gameRunning) return;
+      sfx.hyper();
+      flash = 0.25;
+      for (let i = 0; i < 20; i++) {
+        particles.push({ x: player.x, y: player.y, vx: rnd(-8, 8), vy: rnd(-8, 8), life: rnd(0.3, 0.6), color: '#0ff', size: rnd(2, 5) });
+      }
+      player.x = rnd(0, WORLD_WIDTH);
+      player.y = rnd(80, GROUND_Y * 0.5);
+      player.vx = 0; player.vy = 0;
+      player.invuln = 1.5;
+      addExplosion(player.x, player.y, '#0ff', 16);
+      log('HYPERSPACE JUMP COMPLETE.', true);
+    }
+
+    function fire() {
+      if (player.fireCd > 0) return;
+      player.fireCd = 0.11;
+      sfx.shoot();
+      const speed = 18;
+      bullets.push({
+        x: player.x + player.face * 14,
+        y: player.y,
+        vx: player.face * speed + player.vx * 0.4,
+        vy: player.vy * 0.3,
+        life: 1.4
+      });
+      flash = 0.03;
+    }
+
+    function nearestGroundHuman(x) {
+      let best = null, bd = Infinity;
+      for (const h of humans) {
+        if (h.state !== 'ground') continue;
+        const d = Math.abs(shortDx(x, h.x));
+        if (d < bd) { bd = d; best = h; }
+      }
+      return best;
+    }
+
+    function updatePlayer(dt) {
+      const accel = 0.75;
+      if (keys['ArrowLeft'] || keys['a'] || keys['A']) { player.vx -= accel; player.face = -1; }
+      if (keys['ArrowRight'] || keys['d'] || keys['D']) { player.vx += accel; player.face = 1; }
+      if (keys['ArrowUp'] || keys['w'] || keys['W']) player.vy -= accel;
+      if (keys['ArrowDown'] || keys['s'] || keys['S']) player.vy += accel;
+
+      // engine trail
+      if (Math.abs(player.vx) > 1 || Math.abs(player.vy) > 1) {
+        addTrail(player.x - player.face * 10, player.y, keys['ArrowUp'] || keys['w'] || keys['W'] ? '#0ff' : '#0a0');
+      }
+
+      player.vx *= 0.96;
+      player.vy *= 0.96;
+      const sp = Math.hypot(player.vx, player.vy);
+      const maxSp = 11;
+      if (sp > maxSp) { player.vx *= maxSp / sp; player.vy *= maxSp / sp; }
+
+      player.x = wrap(player.x + player.vx);
+      player.y += player.vy;
+      if (player.y < 20) { player.y = 20; player.vy = 0; }
+
+      const gy = groundYAt(player.x);
+      if (player.y + player.r > gy) {
+        player.y = gy - player.r;
+        if (Math.abs(player.vy) > 4) killPlayer();
+        else player.vy = -Math.abs(player.vy) * 0.3;
+      }
+
+      if (keys[' '] || keys['Spacebar']) fire();
+      if (keys['b'] || keys['B']) smartBomb();
+      if (keys['h'] || keys['H']) hyperspace();
+
+      player.fireCd -= dt;
+      if (player.invuln > 0) player.invuln -= dt;
+
+      if (player.carrying) {
+        player.carrying.x = player.x;
+        player.carrying.y = player.y + player.r + player.carrying.r;
+        const gy = groundYAt(player.carrying.x);
+        const landed = player.carrying.y + player.carrying.r >= gy - 8;
+        if (landed || keys['ArrowDown'] || keys['s'] || keys['S']) {
+          if (landed) {
+            player.carrying.y = gy - player.carrying.r;
+            player.carrying.vy = 0;
+            player.carrying.state = 'ground';
+            score += 500;
+            sfx.land();
+            log('HUMAN RETURNED TO SURFACE. +500', true);
+            addExplosion(player.carrying.x, player.carrying.y, '#5ff', 8, 0.6);
+          } else {
+            player.carrying.state = 'falling';
+            player.carrying.vy = 0;
+          }
+          player.carrying = null;
+        }
+      }
+    }
+
+    function updateBullets(dt) {
+      for (let i = bullets.length - 1; i >= 0; i--) {
+        const b = bullets[i];
+        b.x = wrap(b.x + b.vx);
+        b.life -= dt;
+        if (b.life <= 0) { bullets.splice(i, 1); continue; }
+        for (const e of enemies) {
+          if (dist(b, e) < e.r + 3) {
+            e.hp--;
+            bullets.splice(i, 1);
+            addExplosion(b.x, b.y, '#ff5', 6, 0.5);
+            if (e.hp <= 0) killEnemy(e, 'bullet');
+            break;
+          }
+        }
+      }
+    }
+
+    function updateMines(dt) {
+      for (let i = mines.length - 1; i >= 0; i--) {
+        const m = mines[i];
+        m.vy += 12 * dt;
+        m.y += m.vy;
+        m.life -= dt;
+        const gy = groundYAt(m.x);
+        if (m.y + m.r >= gy || m.life <= 0) {
+          addExplosion(m.x, Math.min(m.y, gy - m.r), '#5f5', 10);
+          mines.splice(i, 1);
+          continue;
+        }
+        if (dist(m, player) < m.r + player.r) {
+          addExplosion(m.x, m.y, '#5f5', 12);
+          mines.splice(i, 1);
+          killPlayer();
+        }
+      }
+    }
+
+    function updateEnemies(dt) {
+      for (let i = enemies.length - 1; i >= 0; i--) {
+        const e = enemies[i];
+        if (e.type === 'lander') {
+          if (!e.carry) {
+            if (!e.target || e.target.state !== 'ground') e.target = nearestGroundHuman(e.x);
+            if (e.target) {
+              const dx = shortDx(e.x, e.target.x);
+              const dy = (e.target.y - 16) - e.y;
+              const d = Math.hypot(dx, dy);
+              if (d > 0) {
+                e.x = wrap(e.x + (dx / d) * e.speed);
+                e.y += (dy / d) * e.speed;
+              }
+              if (d < 14) {
+                e.carry = e.target;
+                e.target.state = 'abducted';
+                sfx.alarm();
+                log('HUMAN ABDUCTED. INTERCEPT LANDER.', true);
+              }
+            } else {
+              e.x = wrap(e.x + Math.sin(Date.now() * 0.001 + i) * e.speed);
+            }
+          } else {
+            e.carry.x = e.x;
+            e.carry.y = e.y + 12;
+            e.y -= 1.0 + wave * 0.05;
+            if (e.y < 40) {
+              const h = e.carry;
+              spawnMutant(e.x, e.y, true);
+              sfx.mutant();
+              log('HUMAN MUTATED. NEUTRALIZE THREAT.', true);
+              const hi = humans.indexOf(h);
+              if (hi >= 0) humans.splice(hi, 1);
+              killEnemy(e, 'mutate');
+              score = Math.max(0, score - 100);
+            }
+          }
+        } else if (e.type === 'mutant') {
+          const dx = shortDx(e.x, player.x);
+          const dy = player.y - e.y;
+          const d = Math.hypot(dx, dy);
+          if (d > 0) {
+            e.x = wrap(e.x + (dx / d) * e.speed);
+            e.y += (dy / d) * e.speed;
+          }
+        } else if (e.type === 'bomber') {
+          e.x = wrap(e.x + e.vx);
+          e.dropCd -= dt;
+          if (e.dropCd <= 0) {
+            spawnMine(e.x, e.y);
+            e.dropCd = rnd(1.2, 2.5);
+          }
+        } else if (e.type === 'pod') {
+          e.phase += dt * 2;
+          e.x = wrap(e.x + e.vx + Math.sin(e.phase) * 0.5);
+          e.y += e.vy + Math.cos(e.phase) * 0.5;
+          if (e.y < 50) e.y = 50;
+          if (e.y > GROUND_Y * 0.45) e.y = GROUND_Y * 0.45;
+        } else if (e.type === 'swarmer') {
+          const dx = shortDx(e.x, player.x);
+          const dy = player.y - e.y;
+          const base = Math.atan2(dy, dx);
+          const ang = base + Math.sin(Date.now() * 0.012 + e.phase) * 0.7;
+          e.x = wrap(e.x + Math.cos(ang) * e.speed);
+          e.y += Math.sin(ang) * e.speed;
+        } else if (e.type === 'baiter') {
+          e.x = wrap(e.x + e.vx * e.speed);
+          const dy = player.y - e.y;
+          e.y += Math.sign(dy) * 3;
+        }
+
+        if (e.y < 15) e.y = 15;
+        if (dist(e, player) < e.r + player.r) {
+          killPlayer();
+          if (e.type !== 'baiter' && e.type !== 'swarmer') killEnemy(e, 'crash');
+        }
+      }
+
+      baiterTimer -= dt;
+      const mainEnemies = enemies.filter(e => e.type !== 'baiter' && e.type !== 'swarmer').length;
+      if (mainEnemies < 3 && baiterTimer <= 0 && gameRunning) {
+        spawnBaiter();
+        baiterTimer = rnd(2.5, 5);
+        log('BAITER INBOUND. HIGH SPEED CONTACT.', true);
+      }
+    }
+
+    function updateHumans(dt) {
+      for (let i = humans.length - 1; i >= 0; i--) {
+        const h = humans[i];
+        if (h.state === 'falling') {
+          h.vy += 1.8 * dt;
+          if (h.vy > 3) h.vy = 3;
+          h.y += h.vy;
+          const gy = groundYAt(h.x);
+          if (h.y + h.r >= gy) {
+            if (h.vy > 7) {
+              sfx.explosion();
+              addExplosion(h.x, gy - h.r, '#f55', 10);
+              humans.splice(i, 1);
+              score = Math.max(0, score - 200);
+              log('HUMAN LOST TO IMPACT. -200', true);
+            } else {
+              h.y = gy - h.r;
+              h.vy = 0;
+              h.state = 'ground';
+              score += 500;
+              sfx.land();
+              log('HUMAN SURVIVED FALL. +500', true);
+            }
+          }
+          if (dist(h, player) < h.r + player.r + 20) {
+            h.state = 'carried';
+            sfx.pickup();
+            log('HUMAN SECURED. RETURN TO SURFACE.', true);
+            if (player.carrying && player.carrying !== h) {
+              player.carrying.state = 'falling';
+              player.carrying.vy = 0;
+            }
+            player.carrying = h;
+          }
+        }
+      }
+    }
+
+    function updateParticles(dt) {
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x = wrap(p.x + p.vx);
+        p.y += p.vy;
+        p.life -= dt;
+        if (p.life <= 0) particles.splice(i, 1);
+      }
+      for (let i = trails.length - 1; i >= 0; i--) {
+        const t = trails[i];
+        t.life -= dt;
+        if (t.life <= 0) trails.splice(i, 1);
+      }
+      if (screenShake > 0) screenShake *= 0.9;
+      if (screenShake < 0.2) screenShake = 0;
+      if (flash > 0) flash = Math.max(0, flash - dt * 1.5);
+      if (bannerTimer > 0) {
+        bannerTimer -= dt;
+        if (bannerTimer <= 0) banner.style.opacity = 0;
+      }
+    }
+
+    function checkWave(dt) {
+      if (waveTimer > 0) { waveTimer -= dt; return; }
+      const mainEnemies = enemies.filter(e => e.type !== 'baiter' && e.type !== 'swarmer').length;
+      if (mainEnemies === 0) nextWave();
+    }
+
+    function update(dt) {
+      if (!gameRunning) return;
+      updatePlayer(dt);
+      updateBullets(dt);
+      updateMines(dt);
+      updateEnemies(dt);
+      updateHumans(dt);
+      updateParticles(dt);
+      checkWave(dt);
+      cameraX = player.x - W / 2;
+    }
+
+    // === CONSOLE ===
+    const logLines = [];
+    function log(msg, important = false) {
+      logLines.push({ text: msg, important });
+      if (logLines.length > 4) logLines.shift();
+      renderConsole();
+    }
+    function clearConsole() { logLines.length = 0; renderConsole(); }
+    function renderConsole() {
+      consoleEl.innerHTML = logLines.map((l, i) =>
+        `<div class="log-entry ${i === logLines.length - 1 ? 'recent' : ''}">&gt; ${l.text}</div>`
+      ).join('');
+    }
+    function showBanner(text) {
+      banner.textContent = text;
+      banner.style.opacity = 1;
+      bannerTimer = 2.2;
+    }
+
+    // === DRAWING ===
+    function drawWrapped(x, drawFn) {
+      const sx = x - cameraX;
+      for (let off = -WORLD_WIDTH; off <= WORLD_WIDTH; off += WORLD_WIDTH) {
+        const px = sx + off;
+        if (px > -120 && px < W + 120) drawFn(px);
+      }
+    }
+
+    function drawShip(px, py) {
+      if (player.invuln > 0 && Math.floor(Date.now() / 80) % 2 === 0) return;
+      ctx.save();
+      ctx.translate(px, py);
+      if (player.face < 0) ctx.scale(-1, 1);
+
+      ctx.shadowBlur = 14;
+      ctx.shadowColor = '#0ff';
+      ctx.fillStyle = '#efffff';
+      ctx.beginPath();
+      ctx.moveTo(14, 0);
+      ctx.lineTo(-9, -8);
+      ctx.lineTo(-5, 0);
+      ctx.lineTo(-9, 8);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = '#0ff';
+      ctx.fillRect(-12, -2, 7, 4);
+
+      ctx.shadowBlur = 0;
+      ctx.restore();
+    }
+
+    function drawEnemy(e, px) {
+      ctx.save();
+      ctx.translate(px, e.y);
+      const c = enemyColor(e.type);
+      ctx.strokeStyle = c;
+      ctx.lineWidth = 2;
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = c;
+      ctx.beginPath();
+      if (e.type === 'lander') {
+        ctx.moveTo(0, -11); ctx.lineTo(10, 0); ctx.lineTo(0, 11); ctx.lineTo(-10, 0); ctx.closePath();
+        if (e.carry) {
+          ctx.moveTo(0, 11); ctx.lineTo(0, 22);
+        }
+      } else if (e.type === 'mutant') {
+        ctx.moveTo(0, -11); ctx.lineTo(9, 0); ctx.lineTo(0, 11); ctx.lineTo(-9, 0);
+        ctx.moveTo(-9, -7); ctx.lineTo(9, 7);
+        ctx.moveTo(-9, 7); ctx.lineTo(9, -7);
+      } else if (e.type === 'bomber') {
+        ctx.rect(-13, -6, 26, 12);
+        ctx.moveTo(0, -6); ctx.lineTo(0, 6);
+        ctx.moveTo(-6, -6); ctx.lineTo(-6, 6);
+        ctx.moveTo(6, -6); ctx.lineTo(6, 6);
+      } else if (e.type === 'pod') {
+        ctx.arc(0, 0, 11, 0, Math.PI * 2);
+        ctx.moveTo(-8, 0); ctx.lineTo(8, 0);
+        ctx.moveTo(0, -8); ctx.lineTo(0, 8);
+        ctx.moveTo(-6, -6); ctx.lineTo(6, 6);
+      } else if (e.type === 'swarmer') {
+        ctx.moveTo(-7, 0); ctx.lineTo(7, 0); ctx.moveTo(0, -7); ctx.lineTo(0, 7);
+        ctx.moveTo(-5, -5); ctx.lineTo(5, 5);
+      } else if (e.type === 'baiter') {
+        ctx.moveTo(11, 0); ctx.lineTo(-9, -8); ctx.lineTo(-4, 0); ctx.lineTo(-9, 8); ctx.closePath();
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawHuman(h, px) {
+      ctx.save();
+      ctx.translate(px, h.y);
+      const c = h.state === 'carried' ? '#0ff' : '#7ff';
+      ctx.fillStyle = c;
+      ctx.shadowBlur = 8;
+      ctx.shadowColor = c;
+      ctx.beginPath();
+      ctx.arc(0, -4, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = c;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, 0); ctx.lineTo(0, 9);
+      ctx.moveTo(-4, 4); ctx.lineTo(4, 4);
+      ctx.moveTo(0, 9); ctx.lineTo(-3, 14);
+      ctx.moveTo(0, 9); ctx.lineTo(3, 14);
+      ctx.stroke();
+      if (h.state === 'abducted') {
+        ctx.fillStyle = '#f55';
+        ctx.fillRect(-3, -16, 6, 3);
+      }
+      ctx.restore();
+    }
+
+    function draw() {
+      // background
+      ctx.fillStyle = '#020502';
+      ctx.fillRect(0, 0, W, H);
+      if (!player) return;
+
+      // starfield with parallax and twinkle
+      ctx.shadowBlur = 0;
+      for (const s of stars) {
+        const px = wrap(s.x - cameraX * s.p - player.vx * s.p * 0.5);
+        const tw = 0.5 + 0.5 * Math.sin(Date.now() * 0.004 + s.twinkle);
+        ctx.globalAlpha = (0.25 + s.p * 0.7) * tw;
+        ctx.fillStyle = s.p > 0.6 ? '#dff' : '#fff';
+        ctx.fillRect(px, s.y, s.s, s.s);
+      }
+      ctx.globalAlpha = 1;
+
+      // distant terrain grid
+      ctx.strokeStyle = 'rgba(0,80,0,0.18)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let gx = 0; gx <= W; gx += 60) {
+        ctx.moveTo(gx, 0); ctx.lineTo(gx, H);
+      }
+      for (let gy = 0; gy <= H; gy += 60) {
+        ctx.moveTo(0, gy); ctx.lineTo(W, gy);
+      }
+      ctx.stroke();
+
+      // ground
+      ctx.fillStyle = 'rgba(0,35,10,0.9)';
+      ctx.strokeStyle = '#0f0';
+      ctx.lineWidth = 2;
+      ctx.shadowBlur = 8;
+      ctx.shadowColor = '#0f0';
+      ctx.beginPath();
+      for (let sx = -100; sx <= W + 100; sx += 8) {
+        const wx = wrap(sx + cameraX);
+        const gy = groundYAt(wx);
+        if (sx === -100) ctx.moveTo(sx, gy); else ctx.lineTo(sx, gy);
+      }
+      ctx.lineTo(W + 100, H);
+      ctx.lineTo(-100, H);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      // trails
+      for (const t of trails) drawWrapped(t.x, px => {
+        ctx.globalAlpha = Math.max(0, t.life * 2.2);
+        ctx.fillStyle = t.color;
+        ctx.beginPath(); ctx.arc(px, t.y, t.size, 0, Math.PI * 2); ctx.fill();
+      });
+      ctx.globalAlpha = 1;
+
+      // entities
+      for (const b of bullets) drawWrapped(b.x, px => {
+        ctx.shadowBlur = 10; ctx.shadowColor = '#ff5';
+        ctx.fillStyle = '#ff5';
+        ctx.fillRect(px - 4, b.y - 1.5, 8, 3);
+      });
+      ctx.shadowBlur = 0;
+      for (const m of mines) drawWrapped(m.x, px => {
+        ctx.shadowBlur = 10; ctx.shadowColor = '#5f5';
+        ctx.fillStyle = '#5f5';
+        ctx.beginPath(); ctx.arc(px, m.y, m.r, 0, Math.PI * 2); ctx.fill();
+      });
+      ctx.shadowBlur = 0;
+      for (const h of humans) drawWrapped(h.x, px => drawHuman(h, px));
+      for (const e of enemies) drawWrapped(e.x, px => drawEnemy(e, px));
+      drawWrapped(player.x, px => drawShip(px, player.y));
+      for (const p of particles) drawWrapped(p.x, px => {
+        ctx.shadowBlur = 8; ctx.shadowColor = p.color;
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = Math.max(0, p.life);
+        ctx.beginPath(); ctx.arc(px, p.y, p.size || 2, 0, Math.PI * 2); ctx.fill();
+      });
+      ctx.globalAlpha = 1;
+      ctx.shadowBlur = 0;
+
+      // HUD update
+      document.getElementById('hud-score').textContent = `SCORE ${score.toString().padStart(7, '0')}`;
+      document.getElementById('hud-wave').textContent = `WAVE ${wave}`;
+      document.getElementById('hud-lives').textContent = `LIVES ${lives}`;
+      document.getElementById('hud-bombs').textContent = `BOMBS ${smartBombs}`;
+      document.getElementById('hud-humans').textContent = `HUMANS ${humans.length}`;
+
+      // flash overlay
+      if (flash > 0) {
+        ctx.fillStyle = `rgba(200,255,255,${flash * 0.35})`;
+        ctx.fillRect(0, 0, W, H);
+      }
+
+      // scanline accent
+      ctx.fillStyle = 'rgba(0,0,0,0.08)';
+      for (let y = 0; y < H; y += 4) ctx.fillRect(0, y, W, 1);
+    }
+
+    function drawRadar() {
+      if (!player) return;
+      rctx.clearRect(0, 0, W, RADAR_H);
+      rctx.fillStyle = 'rgba(0,18,0,0.95)';
+      rctx.fillRect(0, 0, W, RADAR_H);
+      rctx.strokeStyle = '#0f0';
+      rctx.lineWidth = 2;
+      rctx.strokeRect(0, 0, W, RADAR_H);
+      // range ticks
+      rctx.strokeStyle = 'rgba(0,255,0,0.18)';
+      rctx.lineWidth = 1;
+      for (let tx = 0; tx <= W; tx += W / 6) {
+        rctx.beginPath(); rctx.moveTo(tx, 0); rctx.lineTo(tx, RADAR_H); rctx.stroke();
+      }
+      function radarDot(x, y, color, size) {
+        const rx = (wrap(x) / WORLD_WIDTH) * W;
+        rctx.fillStyle = color;
+        rctx.shadowBlur = 8; rctx.shadowColor = color;
+        rctx.fillRect(rx - size / 2, y - size / 2, size, size);
+      }
+      rctx.shadowBlur = 0;
+      for (const h of humans) radarDot(h.x, 11, '#0ff', 4);
+      for (const e of enemies) radarDot(e.x, 21, enemyColor(e.type), e.type === 'lander' && e.carry ? 5 : 4);
+      radarDot(player.x, 32, '#fff', 5);
+      // radar sweep
+      const sweepX = ((Date.now() * 0.05) % WORLD_WIDTH / WORLD_WIDTH) * W;
+      rctx.strokeStyle = 'rgba(0,255,0,0.5)';
+      rctx.lineWidth = 2;
+      rctx.beginPath(); rctx.moveTo(sweepX, 2); rctx.lineTo(sweepX, RADAR_H - 2); rctx.stroke();
+    }
+
+    function gameOver() {
+      gameRunning = false;
+      overlay.querySelector('h1').textContent = 'GAME OVER';
+      overlay.querySelector('p').innerHTML = `Final Score: ${score}<br>Wave Reached: ${wave}`;
+      startBtn.textContent = 'RETRY MISSION';
+      overlay.classList.remove('hidden');
+      ui.classList.add('hidden');
+      consoleEl.classList.add('hidden');
+      radarCanvas.classList.add('hidden');
+      log('MISSION FAILED. SYSTEM STANDBY.', true);
+    }
+
+    function startGame() {
+      ensureAudio();
+      overlay.classList.add('hidden');
+      ui.classList.remove('hidden');
+      consoleEl.classList.remove('hidden');
+      radarCanvas.classList.remove('hidden');
+      resetGame();
+      gameRunning = true;
+    }
+
+    startBtn.addEventListener('click', startGame);
+
+    let last = performance.now();
+    function loop(now) {
+      const dt = Math.min((now - last) / 1000, 0.05);
+      last = now;
+      update(dt);
+
+      // apply screen shake to canvas transform
+      ctx.save();
+      if (screenShake > 0) {
+        const sx = rnd(-screenShake, screenShake);
+        const sy = rnd(-screenShake, screenShake);
+        ctx.translate(sx, sy);
+      }
+      draw();
+      drawRadar();
+      ctx.restore();
+      requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
